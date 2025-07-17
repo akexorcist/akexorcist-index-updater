@@ -50,7 +50,7 @@ The server will start on port 3000 by default. You can specify a different port:
 ## Testing
 Run all unit and integration tests:
 ```sh
-./gradlew test
+./gradlew allTests
 ```
 Or JVM-specific tests:
 ```sh
