@@ -27,7 +27,7 @@ See an example at [akexorcist.dev's article index](https://akexorcist.dev/androi
    ```
 2. **Create a `.env` file in the `server/` directory:**
    ```env
-   GHOST_API_URL=https://your-ghost-blog.com
+   GHOST_API_URL=https://<your_ghost_blog>/ghost/api
    GHOST_ADMIN_API_KEY=your_admin_api_key
    GHOST_CONTENT_API_KEY=your_content_api_key
    INDEX_POST_ID=your_index_post_id
