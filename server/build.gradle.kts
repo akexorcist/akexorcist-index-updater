@@ -44,6 +44,10 @@ kotlin {
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.dotenv)
             implementation(libs.ktor.client.cio)
+            implementation(libs.java.jwt)
+            implementation(libs.koin.core)
+            implementation(libs.koin.ktor)
+            implementation(libs.koin.logger.slf4j)
         }
 
         commonTest {
@@ -52,6 +56,8 @@ kotlin {
                 implementation(libs.ktor.server.test.host)
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.kotest.assertions.json)
+                implementation(libs.kotest.assertions.core)
+                implementation(libs.kotest.framework.engine)
             }
         }
 
@@ -63,6 +69,7 @@ kotlin {
             dependencies {
                 implementation(libs.mockk)
                 implementation(libs.slf4j.simple)
+                implementation(libs.kotest.runner.junit5)
             }
         }
     }
@@ -80,9 +87,14 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile> {
 
 tasks.withType<ShadowJar> {
     archiveBaseName.set("akexorcist-index-updater")
-    archiveVersion.set("1.0.0")
+    archiveVersion.set((findProperty("appVersion") as? String)?.removePrefix("v") ?: "1.0.0")
+    archiveClassifier.set("all")
 
     manifest {
         attributes(mapOf("Main-Class" to jvmMainClass))
     }
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
