@@ -111,4 +111,5 @@ If the credential is missing or incorrect, the server will respond with `401 Una
 If the IP is not allowed, the server will respond with `403 Forbidden`.
 
 ## License
-MIT (or your license here)
+
+This project is licensed under the [Apache License 2.0](LICENSE).
