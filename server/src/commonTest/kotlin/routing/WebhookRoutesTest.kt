@@ -38,6 +38,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = invalidIp,
                 credential = "passphrase",
+                postId = null,
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -68,6 +69,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
+                postId = null,
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -93,6 +95,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
+                postId = null,
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -118,6 +121,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
+                postId = null,
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -125,5 +129,26 @@ class WebhookRoutesTest : FunSpec({
         }
         response.status shouldBe HttpStatusCode.InternalServerError
         response.message shouldBe """{ "message": "Unable to update the post: fail" }"""
+    }
+
+    test("returns OK and skips processing when post ID matches index post ID") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getIndexPostId() } returns "index-post-id"
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = validIp,
+                credential = "passphrase",
+                postId = "index-post-id",
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.OK
+        response.message shouldBe """{ "message": "Webhook received for index post, skipping processing." }"""
     }
 }) 

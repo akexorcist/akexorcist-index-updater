@@ -56,7 +56,11 @@ suspend fun runServer(port: Int) {
         port = port,
     ) {
         install(ServerContentNegotiation) {
-            json()
+            json(
+                Json {
+                    ignoreUnknownKeys = true
+                }
+            )
         }
         install(Koin) {
             modules(getKoinModules())

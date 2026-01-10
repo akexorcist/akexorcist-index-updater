@@ -87,7 +87,6 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile> {
 
 tasks.withType<ShadowJar> {
     archiveBaseName.set("akexorcist-index-updater")
-    archiveVersion.set((findProperty("appVersion") as? String)?.removePrefix("v") ?: "1.0.0")
     archiveClassifier.set("all")
 
     manifest {

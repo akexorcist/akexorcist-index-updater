@@ -24,6 +24,23 @@ data class PostsResponse(
     val posts: List<Post>
 )
 
+@Serializable
+data class GhostWebhookPostCurrent(
+    val id: String
+)
+
+@Serializable
+data class GhostWebhookPost(
+    val current: GhostWebhookPostCurrent? = null,
+    val previous: Map<String, String>? = null
+)
+
+@Serializable
+data class GhostWebhookPayload(
+    val event: String? = null,
+    val post: GhostWebhookPost?
+)
+
 data class ServerResponse(
     val status: HttpStatusCode,
     val message: String,

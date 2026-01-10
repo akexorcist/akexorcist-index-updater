@@ -19,7 +19,14 @@ import shared.Tag
 import kotlinx.serialization.json.Json
 import io.ktor.client.request.post
 import io.ktor.client.request.header
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import shared.GhostWebhookPayload
+import shared.GhostWebhookPost
+import shared.GhostWebhookPostCurrent
+import kotlinx.serialization.encodeToString
 
 class AkexorcistRoutingIntegrationTest : FunSpec({
     val validIp = "1.2.3.4"
@@ -106,6 +113,33 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
             }
             response.status shouldBe HttpStatusCode.InternalServerError
             response.bodyAsText() shouldBe """{ "message": "Unable to update the post: fail" }"""
+        }
+    }
+
+    test("POST /webhook/akexorcist skips processing when webhook payload contains index post ID") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getIndexPostId() } returns "index-post-id"
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val postContentParser = PostContentParser()
+        val webhookPayload = GhostWebhookPayload(
+            event = "post.published",
+            post = GhostWebhookPost(
+                current = GhostWebhookPostCurrent(id = "index-post-id"),
+                previous = null
+            )
+        )
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist?credential=passphrase") {
+                header("X-Forwarded-For", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(Json.encodeToString(webhookPayload))
+            }
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldBe """{ "message": "Webhook received for index post, skipping processing." }"""
         }
     }
 }) 

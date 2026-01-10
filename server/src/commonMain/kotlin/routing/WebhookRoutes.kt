@@ -3,10 +3,12 @@ package routing
 import api.GhostApi
 import config.AppConfiguration
 import io.ktor.server.plugins.origin
+import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
 import io.ktor.http.HttpStatusCode
 import parser.PostContentParser
+import shared.GhostWebhookPayload
 import shared.ServerResponse
 
 fun Route.akexorcistWebhook(
@@ -18,7 +20,14 @@ fun Route.akexorcistWebhook(
         val remoteIp = call.request.headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()
             ?: call.request.origin.remoteHost
         val credential = call.request.queryParameters["credential"]
-        val response = processAkexorcistWebhook(remoteIp, credential, appConfig, ghostApi, postContentParser)
+        val postId = try {
+            val payload = call.receive<GhostWebhookPayload>()
+            payload.post?.current?.id
+        } catch (e: Exception) {
+            println("""{ "message": "Unable to parse webhook body: ${e.message}" }""")
+            null
+        }
+        val response = processAkexorcistWebhook(remoteIp, credential, postId, appConfig, ghostApi, postContentParser)
         call.respond(response.status, response.message)
     }
 }
@@ -26,6 +35,7 @@ fun Route.akexorcistWebhook(
 internal suspend fun processAkexorcistWebhook(
     remoteIp: String,
     credential: String?,
+    postId: String?,
     appConfig: AppConfiguration,
     ghostApi: GhostApi,
     postContentParser: PostContentParser,
@@ -37,6 +47,10 @@ internal suspend fun processAkexorcistWebhook(
     val expectedCredential = appConfig.getVerificationPassphrase()
     if (expectedCredential.isNotEmpty() && credential != expectedCredential) {
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
+    }
+    if (postId != null && postId == appConfig.getIndexPostId()) {
+        println("""{ "message": "Skipping webhook processing for index post" }""")
+        return ServerResponse(HttpStatusCode.OK, """{ "message": "Webhook received for index post, skipping processing." }""")
     }
 
     println("""{ "message": "Getting all posts" }""")
