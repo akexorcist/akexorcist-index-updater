@@ -58,12 +58,12 @@ Or JVM-specific tests:
 ```
 
 ## Deployment
-Deployment is automated via GitHub Actions when you push a tag starting with `v` (e.g., `v1.0.0`). The workflow will run tests, build the JAR, and deploy it to the `deploy` branch.
+Deployment is automated via GitHub Actions. The workflow will run tests, build the JAR, and deploy it to the `deploy` branch.
 
 ### Manual Distribution
 To build a distributable JAR file manually, run:
 ```sh
-./gradlew shadowJar -PappVersion="<app_version>"
+./gradlew shadowJar
 ```
 The JAR will be located in `server/build/libs/`.
 
