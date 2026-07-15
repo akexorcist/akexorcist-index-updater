@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.ktor.http.HttpStatusCode
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import parser.PostContentParser
 import shared.Post
@@ -45,6 +46,71 @@ class WebhookRoutesTest : FunSpec({
             )
         }
         response.status shouldBe HttpStatusCode.Forbidden
+    }
+
+    test("returns Unauthorized when credential does not match configured passphrase") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = validIp,
+                credential = "wrong-passphrase",
+                postId = null,
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.Unauthorized
+        response.message shouldBe """{ "message": "Invalid credential" }"""
+        coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        coVerify(exactly = 0) { ghostApi.updatePostHtml(any(), any(), any()) }
+    }
+
+    test("returns Unauthorized when credential is missing") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = validIp,
+                credential = null,
+                postId = null,
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.Unauthorized
+        response.message shouldBe """{ "message": "Invalid credential" }"""
+        coVerify(exactly = 0) { ghostApi.updatePostHtml(any(), any(), any()) }
+    }
+
+    test("returns Unauthorized and fails closed when passphrase is not configured") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns ""
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = validIp,
+                credential = "any-credential",
+                postId = null,
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.Unauthorized
+        response.message shouldBe """{ "message": "Invalid credential" }"""
+        coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        coVerify(exactly = 0) { ghostApi.updatePostHtml(any(), any(), any()) }
     }
 
     test("returns InternalServerError if post is missing updatedAt") {
