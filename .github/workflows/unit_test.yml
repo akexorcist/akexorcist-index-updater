@@ -10,6 +10,7 @@ on:
 
 jobs:
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,6 +35,7 @@ jobs:
         if: always()
         uses: mikepenz/action-junit-report@v5
         with:
+          check_name: Unit Test Report
           report_paths: 'server/build/test-results/**/*.xml'
           require_tests: true
           detailed_summary: true
