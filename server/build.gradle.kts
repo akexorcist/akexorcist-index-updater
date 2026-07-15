@@ -70,6 +70,7 @@ kotlin {
                 implementation(libs.mockk)
                 implementation(libs.slf4j.simple)
                 implementation(libs.kotest.runner.junit5)
+                implementation(libs.ktor.client.mock)
             }
         }
     }
