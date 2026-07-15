@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO as ClientCIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation as ClientContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO as ServerCIO
 import io.ktor.server.engine.embeddedServer
@@ -21,7 +22,6 @@ import config.AppConfiguration
 import config.DefaultAppConfiguration
 import api.GhostApi
 import api.DefaultGhostApi
-import io.ktor.server.routing.post
 import parser.PostContentParser
 import routing.akexorcistWebhook
 
@@ -68,10 +68,16 @@ suspend fun runServer(port: Int) {
         val appConfig by inject<AppConfiguration>()
         val ghostApi by inject<GhostApi>()
         val postContentParser by inject<PostContentParser>()
-        routing {
-            post("/webhook/akexorcist") {
-                akexorcistWebhook(appConfig, ghostApi, postContentParser)
-            }
-        }
+        configureRouting(appConfig, ghostApi, postContentParser)
     }.startSuspend(wait = true)
+}
+
+fun Application.configureRouting(
+    appConfig: AppConfiguration,
+    ghostApi: GhostApi,
+    postContentParser: PostContentParser,
+) {
+    routing {
+        akexorcistWebhook(appConfig, ghostApi, postContentParser)
+    }
 }

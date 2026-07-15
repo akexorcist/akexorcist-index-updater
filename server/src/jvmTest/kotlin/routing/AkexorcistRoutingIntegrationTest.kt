@@ -8,7 +8,6 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.ktor.serialization.kotlinx.json.json
 import io.mockk.coEvery
@@ -26,6 +25,7 @@ import io.ktor.http.contentType
 import shared.GhostWebhookPayload
 import shared.GhostWebhookPost
 import shared.GhostWebhookPostCurrent
+import shared.configureRouting
 import kotlinx.serialization.encodeToString
 
 class AkexorcistRoutingIntegrationTest : FunSpec({
@@ -48,9 +48,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         postContentParser: PostContentParser
     ) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-        routing {
-            akexorcistWebhook(appConfig, ghostApi, postContentParser)
-        }
+        configureRouting(appConfig, ghostApi, postContentParser)
     }
 
     test("POST /webhook/akexorcist returns 200 OK for valid request") {
