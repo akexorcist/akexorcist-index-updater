@@ -13,6 +13,8 @@ plugins {
 
 val jvmMainClass = "Main_jvmKt"
 
+version = (findProperty("appVersion") as String?) ?: "dev"
+
 kotlin {
     jvm {
         binaries {
