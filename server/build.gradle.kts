@@ -15,6 +15,23 @@ val jvmMainClass = "Main_jvmKt"
 
 version = (findProperty("appVersion") as String?) ?: "dev"
 
+val generateBuildConfig by tasks.registering {
+    val versionValue = version.toString()
+    val outputDir = layout.buildDirectory.dir("generated/buildConfig/kotlin")
+    inputs.property("version", versionValue)
+    outputs.dir(outputDir)
+    doLast {
+        val file = outputDir.get().file("shared/BuildConfig.kt").asFile
+        file.parentFile.mkdirs()
+        file.writeText(
+            "package shared\n\n" +
+                "object BuildConfig {\n" +
+                "    const val VERSION: String = \"$versionValue\"\n" +
+                "}\n"
+        )
+    }
+}
+
 kotlin {
     jvm {
         binaries {
@@ -35,21 +52,24 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.ktor.server.cio)
-            implementation(libs.ktor.server.sse)
-            implementation(libs.ktor.server.websockets)
-            implementation(libs.ktor.server.content.negotiation)
-            implementation(libs.ktor.serialization.json)
-            implementation(libs.ktor.client.logging)
-            implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.dotenv)
-            implementation(libs.ktor.client.cio)
-            implementation(libs.java.jwt)
-            implementation(libs.koin.core)
-            implementation(libs.koin.ktor)
-            implementation(libs.koin.logger.slf4j)
+        commonMain {
+            kotlin.srcDir(generateBuildConfig)
+            dependencies {
+                implementation(libs.kotlinx.serialization.json)
+                implementation(libs.ktor.server.cio)
+                implementation(libs.ktor.server.sse)
+                implementation(libs.ktor.server.websockets)
+                implementation(libs.ktor.server.content.negotiation)
+                implementation(libs.ktor.serialization.json)
+                implementation(libs.ktor.client.logging)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.dotenv)
+                implementation(libs.ktor.client.cio)
+                implementation(libs.java.jwt)
+                implementation(libs.koin.core)
+                implementation(libs.koin.ktor)
+                implementation(libs.koin.logger.slf4j)
+            }
         }
 
         commonTest {
