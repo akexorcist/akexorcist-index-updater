@@ -45,7 +45,12 @@ internal suspend fun processAkexorcistWebhook(
         return ServerResponse(HttpStatusCode.Forbidden, """{ "message": "Invalid IP" }""")
     }
     val expectedCredential = appConfig.getVerificationPassphrase()
-    if (expectedCredential.isNotEmpty() && credential != expectedCredential) {
+    if (expectedCredential.isEmpty()) {
+        // Fail closed: a missing passphrase must never disable verification.
+        println("""{ "message": "Rejecting webhook: verification passphrase is not configured" }""")
+        return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
+    }
+    if (credential != expectedCredential) {
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
     }
     if (postId != null && postId == appConfig.getIndexPostId()) {
