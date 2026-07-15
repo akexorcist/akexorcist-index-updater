@@ -74,6 +74,32 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         }
     }
 
+    test("POST /webhook/akexorcist handles a malformed body without crashing") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getTagWhitelist() } returns tagWhitelist
+            coEvery { getIndexPostId() } returns "1"
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi> {
+            coEvery { getAllPosts() } returns posts
+            coEvery { getPostById(any()) } returns posts[0]
+            coEvery { updatePostHtml(any(), any(), any()) } returns Unit
+        }
+        val postContentParser = PostContentParser()
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist?credential=passphrase") {
+                header("X-Forwarded-For", validIp)
+                contentType(ContentType.Application.Json)
+                setBody("this is not a valid payload")
+            }
+            // Unparseable body -> postId falls back to null -> processing continues normally.
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldBe """{ "message": "Update index successfully." }"""
+        }
+    }
+
     test("POST /webhook/akexorcist returns 403 Forbidden for invalid IP") {
         val appConfig = mockk<AppConfiguration> {
             coEvery { getAllowedIps() } returns setOf(validIp)
