@@ -103,7 +103,6 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
                 contentType(ContentType.Application.Json)
                 setBody("this is not a valid payload")
             }
-            // Unparseable body is rejected; the index is not rebuilt.
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldBe """{ "message": "Invalid webhook payload." }"""
         }

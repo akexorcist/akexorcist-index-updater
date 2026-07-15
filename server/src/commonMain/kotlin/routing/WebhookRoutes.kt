@@ -46,7 +46,6 @@ internal suspend fun processAkexorcistWebhook(
     }
     val expectedCredential = appConfig.getVerificationPassphrase()
     if (expectedCredential.isEmpty()) {
-        // Fail closed: a missing passphrase must never disable verification.
         println("""{ "message": "Rejecting webhook: verification passphrase is not configured" }""")
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
     }
@@ -55,8 +54,6 @@ internal suspend fun processAkexorcistWebhook(
     }
     val postId = when (payload) {
         is WebhookPayload.Malformed -> {
-            // Reject unparseable bodies rather than proceeding: a null postId would
-            // bypass the index-post skip guard and could re-trigger the update loop.
             println("""{ "message": "Rejecting webhook: malformed payload" }""")
             return ServerResponse(HttpStatusCode.BadRequest, """{ "message": "Invalid webhook payload." }""")
         }
