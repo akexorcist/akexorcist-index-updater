@@ -4,10 +4,18 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v3
 
@@ -22,3 +30,12 @@ jobs:
 
       - name: Run tests
         run: ./gradlew allTests
+
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          check_name: Unit Test Report
+          report_paths: 'server/build/test-results/**/*.xml'
+          require_tests: true
+          detailed_summary: true
