@@ -20,14 +20,14 @@ fun Route.akexorcistWebhook(
         val remoteIp = call.request.headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()
             ?: call.request.origin.remoteHost
         val credential = call.request.queryParameters["credential"]
-        val postId = try {
-            val payload = call.receive<GhostWebhookPayload>()
-            payload.post?.current?.id
+        val payload = try {
+            val body = call.receive<GhostWebhookPayload>()
+            WebhookPayload.Parsed(body.post?.current?.id)
         } catch (e: Exception) {
             println("""{ "message": "Unable to parse webhook body: ${e.message}" }""")
-            null
+            WebhookPayload.Malformed
         }
-        val response = processAkexorcistWebhook(remoteIp, credential, postId, appConfig, ghostApi, postContentParser)
+        val response = processAkexorcistWebhook(remoteIp, credential, payload, appConfig, ghostApi, postContentParser)
         call.respond(response.status, response.message)
     }
 }
@@ -35,7 +35,7 @@ fun Route.akexorcistWebhook(
 internal suspend fun processAkexorcistWebhook(
     remoteIp: String,
     credential: String?,
-    postId: String?,
+    payload: WebhookPayload,
     appConfig: AppConfiguration,
     ghostApi: GhostApi,
     postContentParser: PostContentParser,
@@ -46,12 +46,18 @@ internal suspend fun processAkexorcistWebhook(
     }
     val expectedCredential = appConfig.getVerificationPassphrase()
     if (expectedCredential.isEmpty()) {
-        // Fail closed: a missing passphrase must never disable verification.
         println("""{ "message": "Rejecting webhook: verification passphrase is not configured" }""")
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
     }
     if (credential != expectedCredential) {
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
+    }
+    val postId = when (payload) {
+        is WebhookPayload.Malformed -> {
+            println("""{ "message": "Rejecting webhook: malformed payload" }""")
+            return ServerResponse(HttpStatusCode.BadRequest, """{ "message": "Invalid webhook payload." }""")
+        }
+        is WebhookPayload.Parsed -> payload.postId
     }
     if (postId != null && postId == appConfig.getIndexPostId()) {
         println("""{ "message": "Skipping webhook processing for index post" }""")
@@ -80,4 +86,9 @@ internal suspend fun processAkexorcistWebhook(
         println("""{ "message": "Unable to update the post: post not found or missing updated_at" }""")
         ServerResponse(HttpStatusCode.InternalServerError, """{ "message": "Unable to update the post: post not found or missing updated_at." }""")
     }
+}
+
+sealed interface WebhookPayload {
+    data class Parsed(val postId: String?) : WebhookPayload
+    data object Malformed : WebhookPayload
 }

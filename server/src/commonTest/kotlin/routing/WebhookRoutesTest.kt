@@ -39,7 +39,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = invalidIp,
                 credential = "passphrase",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -58,7 +58,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "wrong-passphrase",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -80,7 +80,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = null,
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -101,7 +101,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "any-credential",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -111,6 +111,47 @@ class WebhookRoutesTest : FunSpec({
         response.message shouldBe """{ "message": "Invalid credential" }"""
         coVerify(exactly = 0) { ghostApi.getAllPosts() }
         coVerify(exactly = 0) { ghostApi.updatePostHtml(any(), any(), any()) }
+    }
+
+    test("returns BadRequest for a malformed payload after valid auth") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = validIp,
+                credential = "passphrase",
+                payload = WebhookPayload.Malformed,
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.BadRequest
+        response.message shouldBe """{ "message": "Invalid webhook payload." }"""
+        coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        coVerify(exactly = 0) { ghostApi.updatePostHtml(any(), any(), any()) }
+    }
+
+    test("checks authorization before rejecting a malformed payload") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val response = shouldNotThrowAny {
+            processAkexorcistWebhook(
+                remoteIp = invalidIp,
+                credential = "passphrase",
+                payload = WebhookPayload.Malformed,
+                appConfig = appConfig,
+                ghostApi = ghostApi,
+                postContentParser = postContentParser
+            )
+        }
+        response.status shouldBe HttpStatusCode.Forbidden
     }
 
     test("returns InternalServerError if post is missing updatedAt") {
@@ -135,7 +176,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -161,7 +202,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -187,7 +228,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
-                postId = null,
+                payload = WebhookPayload.Parsed(null),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
@@ -208,7 +249,7 @@ class WebhookRoutesTest : FunSpec({
             processAkexorcistWebhook(
                 remoteIp = validIp,
                 credential = "passphrase",
-                postId = "index-post-id",
+                payload = WebhookPayload.Parsed("index-post-id"),
                 appConfig = appConfig,
                 ghostApi = ghostApi,
                 postContentParser = postContentParser
