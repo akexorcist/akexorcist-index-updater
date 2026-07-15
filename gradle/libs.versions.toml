@@ -6,7 +6,7 @@ ktor = "3.5.0"
 mockk = "1.14.7"
 slf4j = "2.0.18"
 kotest = "5.9.1"
-koin = "3.5.3"
+koin = "4.1.1"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
