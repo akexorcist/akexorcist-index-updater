@@ -42,6 +42,13 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         )
     )
 
+    val nonIndexPayload = Json.encodeToString(
+        GhostWebhookPayload(
+            event = "post.published",
+            post = GhostWebhookPost(current = GhostWebhookPostCurrent(id = "999"), previous = null)
+        )
+    )
+
     fun Application.testModule(
         appConfig: AppConfiguration,
         ghostApi: GhostApi,
@@ -68,13 +75,15 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
                 header("X-Forwarded-For", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
             }
             response.status shouldBe HttpStatusCode.OK
             response.bodyAsText() shouldBe """{ "message": "Update index successfully." }"""
         }
     }
 
-    test("POST /webhook/akexorcist handles a malformed body without crashing") {
+    test("POST /webhook/akexorcist returns 400 for a malformed body") {
         val appConfig = mockk<AppConfiguration> {
             coEvery { getAllowedIps() } returns setOf(validIp)
             coEvery { getTagWhitelist() } returns tagWhitelist
@@ -94,9 +103,9 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
                 contentType(ContentType.Application.Json)
                 setBody("this is not a valid payload")
             }
-            // Unparseable body -> postId falls back to null -> processing continues normally.
-            response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldBe """{ "message": "Update index successfully." }"""
+            // Unparseable body is rejected; the index is not rebuilt.
+            response.status shouldBe HttpStatusCode.BadRequest
+            response.bodyAsText() shouldBe """{ "message": "Invalid webhook payload." }"""
         }
     }
 
@@ -134,6 +143,8 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
                 header("X-Forwarded-For", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
             }
             response.status shouldBe HttpStatusCode.InternalServerError
             response.bodyAsText() shouldBe """{ "message": "Unable to update the post: fail" }"""
