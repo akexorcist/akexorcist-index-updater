@@ -37,12 +37,3 @@ jobs:
           report_paths: 'server/build/test-results/**/*.xml'
           require_tests: true
           detailed_summary: true
-
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-report
-          path: |
-            server/build/reports/tests/
-            server/build/test-results/
