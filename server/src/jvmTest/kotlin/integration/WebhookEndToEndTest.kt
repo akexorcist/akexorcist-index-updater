@@ -31,6 +31,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import parser.PostContentParser
+import routing.ghostSignatureHeader
 import shared.GhostWebhookPayload
 import shared.GhostWebhookPost
 import shared.GhostWebhookPostCurrent
@@ -42,7 +43,7 @@ class WebhookEndToEndTest : FunSpec({
     test("a published post webhook drives a full index rebuild against Ghost") {
         val indexPostId = "index-1"
         val contentApiKey = "content-key-123"
-        val passphrase = "webhook-secret"
+        val secret = "webhook-secret"
         val allowedIp = "127.0.0.1"
 
         val allPostsBody = """
@@ -77,7 +78,7 @@ class WebhookEndToEndTest : FunSpec({
             override fun getTagWhitelist() = setOf("Kotlin")
             override fun getAdminApiKey() = "admin-key-id:0123456789abcdef"
             override fun getContentApiKey() = contentApiKey
-            override fun getVerificationPassphrase() = passphrase
+            override fun getWebhookSecret() = secret
         }
 
         val ghostClient = HttpClient(ClientCIO) {
@@ -100,14 +101,16 @@ class WebhookEndToEndTest : FunSpec({
             server.start(wait = false)
             val port = server.engine.resolvedConnectors().first().port
 
-            val response = client.post("http://$allowedIp:$port/webhook/akexorcist?credential=$passphrase") {
+            val body = Json.encodeToString(payload)
+            val response = client.post("http://$allowedIp:$port/webhook/akexorcist") {
                 header("X-Real-IP", allowedIp)
+                header("X-Ghost-Signature", ghostSignatureHeader(body, secret, System.currentTimeMillis()))
                 contentType(ContentType.Application.Json)
-                setBody(Json.encodeToString(payload))
+                setBody(body)
             }
 
-            response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldBe """{ "message": "Update index successfully." }"""
+            response.status shouldBe HttpStatusCode.Accepted
+            response.bodyAsText() shouldBe """{ "message": "Webhook accepted, updating index." }"""
 
             val getAllPostsPath = ghost.takeRequest(5, TimeUnit.SECONDS).shouldNotBeNull().let {
                 it.method shouldBe "GET"

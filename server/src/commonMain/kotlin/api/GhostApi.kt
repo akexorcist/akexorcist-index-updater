@@ -9,6 +9,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.client.statement.bodyAsText
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -75,10 +76,13 @@ class DefaultGhostApi(
                 )
             )
         )
-        client.put(url) {
+        val response = client.put(url) {
             contentType(ContentType.Application.Json)
             header("Authorization", "Ghost $jwt")
             setBody(Json.encodeToString(body))
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException("Ghost returned ${response.status.value}: ${response.bodyAsText().take(500)}")
         }
     }
 

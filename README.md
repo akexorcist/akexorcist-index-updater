@@ -7,7 +7,7 @@ A Kotlin Multiplatform server for automating the update of an index article on a
 See an example at [akexorcist.dev's article index](https://akexorcist.dev/android-article-index/)
 
 ## Features
-- Webhook endpoint with IP and credential verification
+- Webhook endpoint with IP allowlist and Ghost signature verification
 - Fetches posts from Ghost CMS via Content API
 - Groups and formats posts by tag
 - Updates a target index post using the Admin API
@@ -33,7 +33,7 @@ See an example at [akexorcist.dev's article index](https://akexorcist.dev/androi
    INDEX_POST_ID=your_index_post_id
    ALLOWED_IPS=127.0.0.1,123.456.789.012
    TAG_WHITELIST=Kotlin,Backend
-   VERIFICATION_PASSPHRASE=your_webhook_secret
+   WEBHOOK_SECRET=your_ghost_webhook_secret
    ```
    **Never commit your `.env` file or secrets to version control.**
 
@@ -86,11 +86,21 @@ The JAR will be located in `server/build/libs/`.
 The server exposes a webhook endpoint for triggering the index update:
 
 ```
-POST /webhook/akexorcist?credential=<your_webhook_secret>
+POST /webhook/akexorcist
 ```
 
-- The `credential` query parameter is required and must match the `VERIFICATION_PASSPHRASE` value set in your `.env` file or environment variables.
-- The request must also originate from an IP address listed in `ALLOWED_IPS`.
+Point a Ghost custom integration webhook at `https://<your_endpoint>/webhook/akexorcist` and set its **Secret** to the same value as `WEBHOOK_SECRET`. Do not put the secret in the URL: Ghost writes the webhook URL to its logs.
+
+Every request must:
+- Carry a valid `X-Ghost-Signature` header (`sha256=<hex HMAC-SHA256(secret, body + t)>, t=<timestamp>`), signed less than 5 minutes ago.
+- Come from an IP address listed in `ALLOWED_IPS`.
+
+Responses:
+- `202 Accepted`: the request is valid and the index is rebuilt in the background. Ghost waits only 2 seconds for a reply, so the server answers before the rebuild finishes. Rebuilds run one at a time.
+- `200 OK`: the webhook was for the index post itself, so nothing is rebuilt.
+- `400 Bad Request`: the body is not a valid Ghost payload.
+- `401 Unauthorized`: the signature is missing, wrong, or expired, or `WEBHOOK_SECRET` is not set.
+- `403 Forbidden`: the IP is not allowed.
 
 ### Reverse proxy requirement
 
@@ -106,24 +116,6 @@ real_ip_header CF-Connecting-IP;
 # location block
 proxy_set_header X-Real-IP $remote_addr;
 ```
-
-**Example webhook URL:**
-```
-https://<your_endpoint>/webhook/akexorcist?credential=<your_webhook_secret>
-```
-
-**How to set the credential:**
-- In your `.env` file:
-  ```env
-  VERIFICATION_PASSPHRASE=your_webhook_secret
-  ```
-- Or as an environment variable:
-  ```sh
-  export VERIFICATION_PASSPHRASE=your_webhook_secret
-  ```
-
-If the credential is missing or incorrect, the server will respond with `401 Unauthorized`.
-If the IP is not allowed, the server will respond with `403 Forbidden`.
 
 ## License
 
