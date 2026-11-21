@@ -7,7 +7,7 @@ interface AppConfiguration {
     fun getTagWhitelist(): Set<String>
     fun getAdminApiKey(): String
     fun getContentApiKey(): String
-    fun getVerificationPassphrase(): String
+    fun getWebhookSecret(): String
 }
 
 class DefaultAppConfiguration : AppConfiguration {
@@ -42,7 +42,7 @@ class DefaultAppConfiguration : AppConfiguration {
         System.getenv("GHOST_CONTENT_API_KEY")
             ?: dotenv["GHOST_CONTENT_API_KEY"] ?: ""
 
-    override fun getVerificationPassphrase(): String =
-        System.getenv("VERIFICATION_PASSPHRASE")
-            ?: dotenv["VERIFICATION_PASSPHRASE"] ?: ""
+    override fun getWebhookSecret(): String =
+        System.getenv("WEBHOOK_SECRET")
+            ?: dotenv["WEBHOOK_SECRET"] ?: ""
 }

@@ -4,33 +4,35 @@ import api.GhostApi
 import config.AppConfiguration
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.Application
-import io.ktor.server.application.install
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.testing.testApplication
-import io.ktor.serialization.kotlinx.json.json
-import io.mockk.coEvery
-import io.mockk.mockk
-import parser.PostContentParser
-import shared.Post
-import shared.Tag
-import kotlinx.serialization.json.Json
-import io.ktor.client.request.post
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
+import io.ktor.server.application.install
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.routing.routing
+import io.ktor.server.testing.ApplicationTestBuilder
+import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.serialization.json.Json
+import parser.PostContentParser
 import shared.GhostWebhookPayload
 import shared.GhostWebhookPost
 import shared.GhostWebhookPostCurrent
-import shared.configureRouting
-import kotlinx.serialization.encodeToString
+import shared.Post
+import shared.Tag
 
 class AkexorcistRoutingIntegrationTest : FunSpec({
     val validIp = "1.2.3.4"
-    val tagWhitelist = setOf("Kotlin")
+    val secret = "webhook-secret"
+    val now = 1_700_000_000_000L
     val posts = listOf(
         Post(
             id = "1",
@@ -42,215 +44,133 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         )
     )
 
-    val nonIndexPayload = Json.encodeToString(
+    fun payload(postId: String) = Json.encodeToString(
         GhostWebhookPayload(
             event = "post.published",
-            post = GhostWebhookPost(current = GhostWebhookPostCurrent(id = "999"), previous = null)
+            post = GhostWebhookPost(current = GhostWebhookPostCurrent(id = postId), previous = null)
         )
     )
 
-    fun Application.testModule(
-        appConfig: AppConfiguration,
-        ghostApi: GhostApi,
-        postContentParser: PostContentParser
-    ) {
+    val appConfig = mockk<AppConfiguration> {
+        coEvery { getAllowedIps() } returns setOf(validIp)
+        coEvery { getTagWhitelist() } returns setOf("Kotlin")
+        coEvery { getIndexPostId() } returns "index-post-id"
+        coEvery { getWebhookSecret() } returns secret
+    }
+
+    fun ghostApi() = mockk<GhostApi> {
+        coEvery { getAllPosts() } returns posts
+        coEvery { getPostById(any()) } returns posts[0]
+        coEvery { updatePostHtml(any(), any(), any()) } returns Unit
+    }
+
+    fun Application.testModule(ghostApi: GhostApi) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-        configureRouting(appConfig, ghostApi, postContentParser)
+        routing { akexorcistWebhook(appConfig, ghostApi, PostContentParser(), clock = { now }) }
     }
 
-    test("POST /webhook/akexorcist returns 200 OK for valid request") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getTagWhitelist() } returns tagWhitelist
-            coEvery { getIndexPostId() } returns "1"
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi> {
-            coEvery { getAllPosts() } returns posts
-            coEvery { getPostById(any()) } returns posts[0]
-            coEvery { updatePostHtml(any(), any(), any()) } returns Unit
-        }
-        val postContentParser = PostContentParser()
+    suspend fun ApplicationTestBuilder.postWebhook(
+        body: String,
+        realIp: String? = validIp,
+        signature: String? = ghostSignatureHeader(body, secret, now),
+        forwardedFor: String? = null,
+    ) = client.post("/webhook/akexorcist") {
+        realIp?.let { header("X-Real-IP", it) }
+        forwardedFor?.let { header("X-Forwarded-For", it) }
+        signature?.let { header("X-Ghost-Signature", it) }
+        contentType(ContentType.Application.Json)
+        setBody(body)
+    }
+
+    test("a signed webhook is answered with 202 and the index is rebuilt in the background") {
+        val ghostApi = ghostApi()
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Real-IP", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
-            response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldBe """{ "message": "Update index successfully." }"""
+            application { testModule(ghostApi) }
+            val response = postWebhook(payload("999"))
+            response.status shouldBe HttpStatusCode.Accepted
+            response.bodyAsText() shouldBe """{ "message": "Webhook accepted, updating index." }"""
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
         }
     }
 
-    test("POST /webhook/akexorcist returns 400 for a malformed body") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getTagWhitelist() } returns tagWhitelist
-            coEvery { getIndexPostId() } returns "1"
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi> {
-            coEvery { getAllPosts() } returns posts
-            coEvery { getPostById(any()) } returns posts[0]
-            coEvery { updatePostHtml(any(), any(), any()) } returns Unit
-        }
-        val postContentParser = PostContentParser()
+    test("a rebuild that crashes does not stop later webhooks from being processed") {
+        val ghostApi = ghostApi()
+        coEvery { ghostApi.getPostById(any()) } throws RuntimeException("network down") andThen posts[0]
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
+            application { testModule(ghostApi) }
+            postWebhook(payload("999")).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.getPostById(any()) }
+            postWebhook(payload("999")).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
+        }
+    }
+
+    test("an unsigned webhook is rejected and nothing is rebuilt") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val response = postWebhook(payload("999"), signature = null)
+            response.status shouldBe HttpStatusCode.Unauthorized
+            response.bodyAsText() shouldBe """{ "message": "Invalid signature" }"""
+            coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        }
+    }
+
+    test("the old credential query parameter is no longer accepted") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val response = client.post("/webhook/akexorcist?credential=$secret") {
                 header("X-Real-IP", validIp)
                 contentType(ContentType.Application.Json)
-                setBody("this is not a valid payload")
+                setBody(payload("999"))
             }
+            response.status shouldBe HttpStatusCode.Unauthorized
+        }
+    }
+
+    test("returns 400 for a malformed body") {
+        testApplication {
+            application { testModule(ghostApi()) }
+            val response = postWebhook("this is not a valid payload")
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldBe """{ "message": "Invalid webhook payload." }"""
         }
     }
 
-    test("POST /webhook/akexorcist returns 403 Forbidden for invalid IP") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
+    test("returns 403 Forbidden for an IP outside the allow list") {
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Real-IP", "9.9.9.9")
-            }
+            application { testModule(ghostApi()) }
+            val response = postWebhook(payload("999"), realIp = "9.9.9.9")
             response.status shouldBe HttpStatusCode.Forbidden
             response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
         }
     }
 
-    test("POST /webhook/akexorcist ignores a spoofed X-Forwarded-For when X-Real-IP is absent") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
+    test("ignores a spoofed X-Forwarded-For when X-Real-IP is absent") {
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
+            application { testModule(ghostApi()) }
+            val response = postWebhook(payload("999"), realIp = null, forwardedFor = validIp)
             response.status shouldBe HttpStatusCode.Forbidden
-            response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
         }
     }
 
-    test("POST /webhook/akexorcist uses X-Real-IP over a spoofed X-Forwarded-For") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
+    test("uses X-Real-IP over a spoofed X-Forwarded-For") {
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
-                header("X-Real-IP", "9.9.9.9")
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
+            application { testModule(ghostApi()) }
+            val response = postWebhook(payload("999"), realIp = "9.9.9.9", forwardedFor = validIp)
             response.status shouldBe HttpStatusCode.Forbidden
-            response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
         }
     }
 
-    test("POST /webhook/akexorcist returns 401 Unauthorized for a wrong credential") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
+    test("skips processing when the webhook is for the index post itself") {
+        val ghostApi = ghostApi()
         testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=wrong") {
-                header("X-Real-IP", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
-            response.status shouldBe HttpStatusCode.Unauthorized
-            response.bodyAsText() shouldBe """{ "message": "Invalid credential" }"""
-        }
-    }
-
-    test("POST /webhook/akexorcist returns 401 Unauthorized when the credential is missing") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
-        testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist") {
-                header("X-Real-IP", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
-            response.status shouldBe HttpStatusCode.Unauthorized
-            response.bodyAsText() shouldBe """{ "message": "Invalid credential" }"""
-        }
-    }
-
-    test("POST /webhook/akexorcist returns 500 InternalServerError if updatePostHtml throws") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getTagWhitelist() } returns tagWhitelist
-            coEvery { getIndexPostId() } returns "1"
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi> {
-            coEvery { getAllPosts() } returns posts
-            coEvery { getPostById(any()) } returns posts[0]
-            coEvery { updatePostHtml(any(), any(), any()) } throws RuntimeException("fail")
-        }
-        val postContentParser = PostContentParser()
-        testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Real-IP", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(nonIndexPayload)
-            }
-            response.status shouldBe HttpStatusCode.InternalServerError
-            response.bodyAsText() shouldBe """{ "message": "Unable to update the post: fail" }"""
-        }
-    }
-
-    test("POST /webhook/akexorcist skips processing when webhook payload contains index post ID") {
-        val appConfig = mockk<AppConfiguration> {
-            coEvery { getAllowedIps() } returns setOf(validIp)
-            coEvery { getIndexPostId() } returns "index-post-id"
-            coEvery { getVerificationPassphrase() } returns "passphrase"
-        }
-        val ghostApi = mockk<GhostApi>(relaxed = true)
-        val postContentParser = PostContentParser()
-        val webhookPayload = GhostWebhookPayload(
-            event = "post.published",
-            post = GhostWebhookPost(
-                current = GhostWebhookPostCurrent(id = "index-post-id"),
-                previous = null
-            )
-        )
-        testApplication {
-            application { testModule(appConfig, ghostApi, postContentParser) }
-            val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Real-IP", validIp)
-                contentType(ContentType.Application.Json)
-                setBody(Json.encodeToString(webhookPayload))
-            }
+            application { testModule(ghostApi) }
+            val response = postWebhook(payload("index-post-id"))
             response.status shouldBe HttpStatusCode.OK
             response.bodyAsText() shouldBe """{ "message": "Webhook received for index post, skipping processing." }"""
+            coVerify(exactly = 0) { ghostApi.getAllPosts() }
         }
     }
-}) 
+})

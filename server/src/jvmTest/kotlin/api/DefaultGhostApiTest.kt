@@ -1,6 +1,7 @@
 package api
 
 import config.AppConfiguration
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
@@ -97,5 +98,13 @@ class DefaultGhostApiTest : FunSpec({
         req.method shouldBe HttpMethod.Put
         req.url.toString() shouldContain "/admin/posts/9/"
         req.headers[HttpHeaders.Authorization]!! shouldStartWith "Ghost "
+    }
+
+    test("updatePostHtml throws when Ghost rejects the update") {
+        val api = DefaultGhostApi(config(), clientReturning(HttpStatusCode.Conflict, errorBody))
+        val error = shouldThrow<IllegalStateException> {
+            api.updatePostHtml(postId = "9", lexical = "{\"root\":{}}", updatedAt = "2024-06-03T10:00:00Z")
+        }
+        error.message!! shouldStartWith "Ghost returned 409"
     }
 })
