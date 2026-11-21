@@ -74,7 +74,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         testApplication {
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
+                header("X-Real-IP", validIp)
                 contentType(ContentType.Application.Json)
                 setBody(nonIndexPayload)
             }
@@ -99,7 +99,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         testApplication {
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
+                header("X-Real-IP", validIp)
                 contentType(ContentType.Application.Json)
                 setBody("this is not a valid payload")
             }
@@ -118,10 +118,87 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         testApplication {
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", "9.9.9.9")
+                header("X-Real-IP", "9.9.9.9")
             }
             response.status shouldBe HttpStatusCode.Forbidden
             response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
+        }
+    }
+
+    test("POST /webhook/akexorcist ignores a spoofed X-Forwarded-For when X-Real-IP is absent") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val postContentParser = PostContentParser()
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist?credential=passphrase") {
+                header("X-Forwarded-For", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
+            }
+            response.status shouldBe HttpStatusCode.Forbidden
+            response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
+        }
+    }
+
+    test("POST /webhook/akexorcist uses X-Real-IP over a spoofed X-Forwarded-For") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val postContentParser = PostContentParser()
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist?credential=passphrase") {
+                header("X-Forwarded-For", validIp)
+                header("X-Real-IP", "9.9.9.9")
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
+            }
+            response.status shouldBe HttpStatusCode.Forbidden
+            response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
+        }
+    }
+
+    test("POST /webhook/akexorcist returns 401 Unauthorized for a wrong credential") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val postContentParser = PostContentParser()
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist?credential=wrong") {
+                header("X-Real-IP", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
+            }
+            response.status shouldBe HttpStatusCode.Unauthorized
+            response.bodyAsText() shouldBe """{ "message": "Invalid credential" }"""
+        }
+    }
+
+    test("POST /webhook/akexorcist returns 401 Unauthorized when the credential is missing") {
+        val appConfig = mockk<AppConfiguration> {
+            coEvery { getAllowedIps() } returns setOf(validIp)
+            coEvery { getVerificationPassphrase() } returns "passphrase"
+        }
+        val ghostApi = mockk<GhostApi>(relaxed = true)
+        val postContentParser = PostContentParser()
+        testApplication {
+            application { testModule(appConfig, ghostApi, postContentParser) }
+            val response = client.post("/webhook/akexorcist") {
+                header("X-Real-IP", validIp)
+                contentType(ContentType.Application.Json)
+                setBody(nonIndexPayload)
+            }
+            response.status shouldBe HttpStatusCode.Unauthorized
+            response.bodyAsText() shouldBe """{ "message": "Invalid credential" }"""
         }
     }
 
@@ -141,7 +218,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         testApplication {
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
+                header("X-Real-IP", validIp)
                 contentType(ContentType.Application.Json)
                 setBody(nonIndexPayload)
             }
@@ -168,7 +245,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         testApplication {
             application { testModule(appConfig, ghostApi, postContentParser) }
             val response = client.post("/webhook/akexorcist?credential=passphrase") {
-                header("X-Forwarded-For", validIp)
+                header("X-Real-IP", validIp)
                 contentType(ContentType.Application.Json)
                 setBody(Json.encodeToString(webhookPayload))
             }

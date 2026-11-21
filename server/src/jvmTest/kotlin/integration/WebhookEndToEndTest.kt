@@ -101,7 +101,7 @@ class WebhookEndToEndTest : FunSpec({
             val port = server.engine.resolvedConnectors().first().port
 
             val response = client.post("http://$allowedIp:$port/webhook/akexorcist?credential=$passphrase") {
-                header("X-Forwarded-For", allowedIp)
+                header("X-Real-IP", allowedIp)
                 contentType(ContentType.Application.Json)
                 setBody(Json.encodeToString(payload))
             }

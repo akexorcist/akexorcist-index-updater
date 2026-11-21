@@ -10,6 +10,7 @@ import io.ktor.http.HttpStatusCode
 import parser.PostContentParser
 import shared.GhostWebhookPayload
 import shared.ServerResponse
+import java.security.MessageDigest
 
 fun Route.akexorcistWebhook(
     appConfig: AppConfiguration,
@@ -17,7 +18,7 @@ fun Route.akexorcistWebhook(
     postContentParser: PostContentParser
 ) {
     post("/webhook/akexorcist") {
-        val remoteIp = call.request.headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()
+        val remoteIp = call.request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: call.request.origin.remoteHost
         val credential = call.request.queryParameters["credential"]
         val payload = try {
@@ -49,7 +50,7 @@ internal suspend fun processAkexorcistWebhook(
         println("""{ "message": "Rejecting webhook: verification passphrase is not configured" }""")
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
     }
-    if (credential != expectedCredential) {
+    if (credential == null || !MessageDigest.isEqual(credential.toByteArray(), expectedCredential.toByteArray())) {
         return ServerResponse(HttpStatusCode.Unauthorized, """{ "message": "Invalid credential" }""")
     }
     val postId = when (payload) {

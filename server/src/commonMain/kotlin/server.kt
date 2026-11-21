@@ -52,7 +52,7 @@ suspend fun runServer(port: Int) {
     println("""{ "message": "Starting server ${BuildConfig.VERSION} on port $port" }""")
     embeddedServer(
         factory = ServerCIO,
-        host = "0.0.0.0",
+        host = "127.0.0.1",
         port = port,
     ) {
         install(ServerContentNegotiation) {
