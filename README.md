@@ -92,6 +92,21 @@ POST /webhook/akexorcist?credential=<your_webhook_secret>
 - The `credential` query parameter is required and must match the `VERIFICATION_PASSPHRASE` value set in your `.env` file or environment variables.
 - The request must also originate from an IP address listed in `ALLOWED_IPS`.
 
+### Reverse proxy requirement
+
+The server listens on `127.0.0.1` only and must run behind a reverse proxy. The client IP checked against `ALLOWED_IPS` is read from the `X-Real-IP` header, falling back to the connection address. `X-Forwarded-For` is ignored because any client can set it.
+
+The proxy must overwrite `X-Real-IP` with the real client address. For nginx behind Cloudflare, restore the visitor IP from Cloudflare first, then pass it on:
+
+```nginx
+# http or server block: one set_real_ip_from line per range in https://www.cloudflare.com/ips
+set_real_ip_from 173.245.48.0/20;
+real_ip_header CF-Connecting-IP;
+
+# location block
+proxy_set_header X-Real-IP $remote_addr;
+```
+
 **Example webhook URL:**
 ```
 https://<your_endpoint>/webhook/akexorcist?credential=<your_webhook_secret>
