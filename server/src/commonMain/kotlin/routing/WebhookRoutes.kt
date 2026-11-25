@@ -3,17 +3,21 @@ package routing
 import api.GhostApi
 import config.AppConfiguration
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.origin
-import io.ktor.server.request.receive
+import io.ktor.server.request.contentLength
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
 import parser.PostContentParser
 import shared.GhostWebhookPayload
@@ -23,6 +27,12 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 private const val SIGNATURE_TOLERANCE_MILLIS = 5 * 60 * 1000L
+
+internal const val MAX_WEBHOOK_BODY_BYTES = 1024 * 1024L
+
+private val invalidIpResponse = ServerResponse(HttpStatusCode.Forbidden, """{ "message": "Invalid IP" }""")
+
+private val payloadTooLargeResponse = ServerResponse(HttpStatusCode.PayloadTooLarge, """{ "message": "Payload too large." }""")
 
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
@@ -39,7 +49,16 @@ fun Route.akexorcistWebhook(
     post("/webhook/akexorcist") {
         val remoteIp = call.request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: call.request.origin.remoteHost
-        val rawBody = call.receive<ByteArray>()
+        if (remoteIp !in appConfig.getAllowedIps()) {
+            println("""{ "message": "Rejecting webhook from $remoteIp before reading the body" }""")
+            call.respond(invalidIpResponse.status, invalidIpResponse.message)
+            return@post
+        }
+        val rawBody = call.receiveBodyUpTo(MAX_WEBHOOK_BODY_BYTES)
+        if (rawBody == null) {
+            call.respond(payloadTooLargeResponse.status, payloadTooLargeResponse.message)
+            return@post
+        }
         val signatureHeader = call.request.headers["X-Ghost-Signature"]
         val nowMillis = clock()
         val decision = verifyAkexorcistWebhook(
@@ -72,6 +91,12 @@ fun Route.akexorcistWebhook(
     }
 }
 
+private suspend fun ApplicationCall.receiveBodyUpTo(maxBytes: Long): ByteArray? {
+    if ((request.contentLength() ?: 0L) > maxBytes) return null
+    val body = receiveChannel().readRemaining(maxBytes + 1).readByteArray()
+    return body.takeIf { it.size <= maxBytes }
+}
+
 internal fun verifyAkexorcistWebhook(
     remoteIp: String,
     signatureHeader: String?,
@@ -81,7 +106,7 @@ internal fun verifyAkexorcistWebhook(
 ): WebhookDecision {
     println("""{ "message": "Incoming webhook from $remoteIp" }""")
     if (remoteIp !in appConfig.getAllowedIps()) {
-        return WebhookDecision.Rejected(ServerResponse(HttpStatusCode.Forbidden, """{ "message": "Invalid IP" }"""))
+        return WebhookDecision.Rejected(invalidIpResponse)
     }
     val secret = appConfig.getWebhookSecret()
     if (secret.isEmpty()) {
