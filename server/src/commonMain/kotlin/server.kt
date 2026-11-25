@@ -38,7 +38,7 @@ private val appModule = module {
                 )
             }
             install(Logging) {
-                logger = Logger.SIMPLE
+                logger = RedactingLogger(Logger.SIMPLE)
                 level = LogLevel.INFO
             }
         }
