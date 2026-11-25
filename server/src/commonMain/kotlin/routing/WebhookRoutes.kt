@@ -26,6 +26,8 @@ private const val SIGNATURE_TOLERANCE_MILLIS = 5 * 60 * 1000L
 
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
+private val alreadyDeliveredResponse = ServerResponse(HttpStatusCode.OK, """{ "message": "Webhook already delivered, skipping processing." }""")
+
 fun Route.akexorcistWebhook(
     appConfig: AppConfiguration,
     ghostApi: GhostApi,
@@ -33,18 +35,27 @@ fun Route.akexorcistWebhook(
     clock: () -> Long = System::currentTimeMillis,
 ) {
     val rebuildLock = Mutex()
+    val recentSignatures = RecentSignatures(windowMillis = SIGNATURE_TOLERANCE_MILLIS)
     post("/webhook/akexorcist") {
         val remoteIp = call.request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: call.request.origin.remoteHost
         val rawBody = call.receive<ByteArray>()
+        val signatureHeader = call.request.headers["X-Ghost-Signature"]
+        val nowMillis = clock()
         val decision = verifyAkexorcistWebhook(
             remoteIp = remoteIp,
-            signatureHeader = call.request.headers["X-Ghost-Signature"],
+            signatureHeader = signatureHeader,
             rawBody = rawBody,
             appConfig = appConfig,
-            nowMillis = clock(),
+            nowMillis = nowMillis,
         )
         if (decision is WebhookDecision.Accepted) {
+            val signature = parseGhostSignature(signatureHeader)
+            if (signature == null || !recentSignatures.isFirstDelivery(signature.hex, signature.signedAtMillis, nowMillis)) {
+                println("""{ "message": "Ignoring a webhook that was already delivered" }""")
+                call.respond(alreadyDeliveredResponse.status, alreadyDeliveredResponse.message)
+                return@post
+            }
             call.application.launch(Dispatchers.IO) {
                 rebuildLock.withLock {
                     try {
@@ -99,19 +110,26 @@ internal fun isValidGhostSignature(
     secret: String,
     nowMillis: Long,
 ): Boolean {
-    if (signatureHeader == null) return false
-    val parts = signatureHeader.split(",").associate { part ->
-        part.trim().substringBefore("=") to part.trim().substringAfter("=", "")
-    }
-    val signature = parts["sha256"]?.takeIf { it.isNotEmpty() } ?: return false
-    val timestamp = parts["t"]?.toLongOrNull() ?: return false
-    if (kotlin.math.abs(nowMillis - timestamp) > SIGNATURE_TOLERANCE_MILLIS) return false
+    val signature = parseGhostSignature(signatureHeader) ?: return false
+    if (kotlin.math.abs(nowMillis - signature.signedAtMillis) > SIGNATURE_TOLERANCE_MILLIS) return false
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(secret.toByteArray(), "HmacSHA256"))
     mac.update(rawBody)
-    mac.update(timestamp.toString().toByteArray())
+    mac.update(signature.signedAtMillis.toString().toByteArray())
     val expected = mac.doFinal().joinToString("") { "%02x".format(it) }
-    return MessageDigest.isEqual(expected.toByteArray(), signature.lowercase().toByteArray())
+    return MessageDigest.isEqual(expected.toByteArray(), signature.hex.lowercase().toByteArray())
+}
+
+internal data class GhostSignature(val hex: String, val signedAtMillis: Long)
+
+internal fun parseGhostSignature(signatureHeader: String?): GhostSignature? {
+    if (signatureHeader == null) return null
+    val parts = signatureHeader.split(",").associate { part ->
+        part.trim().substringBefore("=") to part.trim().substringAfter("=", "")
+    }
+    val hex = parts["sha256"]?.takeIf { it.isNotEmpty() } ?: return null
+    val signedAtMillis = parts["t"]?.toLongOrNull() ?: return null
+    return GhostSignature(hex, signedAtMillis)
 }
 
 internal suspend fun rebuildIndex(
