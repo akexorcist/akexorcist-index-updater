@@ -11,6 +11,9 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.http.content.OutgoingContent
+import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.writeFully
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -21,6 +24,8 @@ import io.ktor.server.testing.testApplication
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import parser.PostContentParser
 import shared.GhostWebhookPayload
@@ -193,6 +198,68 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
             application { testModule(ghostApi) }
             val body = payload("999")
             postWebhook(body, realIp = "9.9.9.9").status shouldBe HttpStatusCode.Forbidden
+            postWebhook(body).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
+        }
+    }
+
+    test("rejects an IP outside the allow list without waiting for the body") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val response = withTimeout(5_000) {
+                client.post("/webhook/akexorcist") {
+                    header("X-Real-IP", "9.9.9.9")
+                    setBody(object : OutgoingContent.WriteChannelContent() {
+                        override val contentType = ContentType.Application.Json
+                        override suspend fun writeTo(channel: ByteWriteChannel) {
+                            channel.writeFully("{".encodeToByteArray())
+                            channel.flush()
+                            awaitCancellation()
+                        }
+                    })
+                }
+            }
+            response.status shouldBe HttpStatusCode.Forbidden
+            response.bodyAsText() shouldBe """{ "message": "Invalid IP" }"""
+            coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        }
+    }
+
+    test("returns 413 for a body over the limit from an allowed IP") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val response = postWebhook("x".repeat(MAX_WEBHOOK_BODY_BYTES.toInt() + 1))
+            response.status shouldBe HttpStatusCode.PayloadTooLarge
+            coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        }
+    }
+
+    test("returns 413 for a chunked body over the limit sent without Content-Length") {
+        val ghostApi = ghostApi()
+        val oversized = ByteArray(MAX_WEBHOOK_BODY_BYTES.toInt() + 1) { 'x'.code.toByte() }
+        testApplication {
+            application { testModule(ghostApi) }
+            val response = client.post("/webhook/akexorcist") {
+                header("X-Real-IP", validIp)
+                setBody(object : OutgoingContent.WriteChannelContent() {
+                    override val contentType = ContentType.Application.Json
+                    override suspend fun writeTo(channel: ByteWriteChannel) {
+                        channel.writeFully(oversized)
+                    }
+                })
+            }
+            response.status shouldBe HttpStatusCode.PayloadTooLarge
+            coVerify(exactly = 0) { ghostApi.getAllPosts() }
+        }
+    }
+
+    test("accepts a signed webhook as large as a long blog post") {
+        val ghostApi = ghostApi()
+        val body = payload("999").replaceFirst("{", """{"padding":"${"x".repeat(900 * 1024)}",""")
+        testApplication {
+            application { testModule(ghostApi) }
             postWebhook(body).status shouldBe HttpStatusCode.Accepted
             coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
         }
