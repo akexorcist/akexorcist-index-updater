@@ -98,7 +98,7 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
         coEvery { ghostApi.getPostById(any()) } throws RuntimeException("network down") andThen posts[0]
         testApplication {
             application { testModule(ghostApi) }
-            postWebhook(payload("999")).status shouldBe HttpStatusCode.Accepted
+            postWebhook(payload("998")).status shouldBe HttpStatusCode.Accepted
             coVerify(timeout = 5_000, exactly = 1) { ghostApi.getPostById(any()) }
             postWebhook(payload("999")).status shouldBe HttpStatusCode.Accepted
             coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
@@ -160,6 +160,41 @@ class AkexorcistRoutingIntegrationTest : FunSpec({
             application { testModule(ghostApi()) }
             val response = postWebhook(payload("999"), realIp = "9.9.9.9", forwardedFor = validIp)
             response.status shouldBe HttpStatusCode.Forbidden
+        }
+    }
+
+    test("a replayed signed webhook is answered but does not rebuild the index again") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val body = payload("999")
+            postWebhook(body).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
+            val replay = postWebhook(body)
+            replay.status shouldBe HttpStatusCode.OK
+            replay.bodyAsText() shouldBe """{ "message": "Webhook already delivered, skipping processing." }"""
+            coVerify(exactly = 1) { ghostApi.getAllPosts() }
+        }
+    }
+
+    test("two different signed webhooks both rebuild the index") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            postWebhook(payload("111")).status shouldBe HttpStatusCode.Accepted
+            postWebhook(payload("222")).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 2) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
+        }
+    }
+
+    test("a rejected request does not use up the signature of a later valid delivery") {
+        val ghostApi = ghostApi()
+        testApplication {
+            application { testModule(ghostApi) }
+            val body = payload("999")
+            postWebhook(body, realIp = "9.9.9.9").status shouldBe HttpStatusCode.Forbidden
+            postWebhook(body).status shouldBe HttpStatusCode.Accepted
+            coVerify(timeout = 5_000, exactly = 1) { ghostApi.updatePostHtml("index-post-id", any(), any()) }
         }
     }
 
